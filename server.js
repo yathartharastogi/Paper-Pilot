@@ -182,6 +182,23 @@ async function handleRestoreSession(req, res) {
   json(res, 200, { paperId, graph });
 }
 
+function handlePaperPdf(_req, res, paperId) {
+  const paper = papers.get(paperId);
+  if (!paper?.pdf?.data) {
+    res.writeHead(404);
+    res.end('Paper not found');
+    return;
+  }
+  const bytes = Buffer.from(paper.pdf.data, 'base64');
+  res.writeHead(200, {
+    'Content-Type': paper.pdf.mimeType || 'application/pdf',
+    'Content-Disposition': 'inline',
+    'Content-Length': bytes.length,
+    'Cache-Control': 'no-store, max-age=0',
+  });
+  res.end(bytes);
+}
+
 async function handleQuestion(req, res) {
   const body = await readJson(req);
   const paper = papers.get(body.paperId);
@@ -240,14 +257,16 @@ async function handleHealth(_req, res) {
 function createServer() {
   return http.createServer(async (req, res) => {
     try {
+    const requestUrl = new URL(req.url, 'http://localhost');
+    const paperPdfMatch = requestUrl.pathname.match(/^\/api\/papers\/([^/]+)\.pdf$/);
     if (req.method === 'GET' && req.url === '/api/health') return handleHealth(req, res);
+    if (req.method === 'GET' && paperPdfMatch) return handlePaperPdf(req, res, decodeURIComponent(paperPdfMatch[1]));
     if (req.method === 'POST' && req.url === '/api/analyze') return await handleAnalyze(req, res);
     if (req.method === 'POST' && req.url === '/api/session') return await handleRestoreSession(req, res);
     if (req.method === 'POST' && req.url === '/api/question') return await handleQuestion(req, res);
     if (req.method === 'GET' && req.url.startsWith('/api/research/graph')) return handleResearchGraph(req, res);
     if (req.method === 'POST' && req.url === '/api/research/explore') return await handleResearchExplore(req, res);
 
-    const requestUrl = new URL(req.url, 'http://localhost');
     const cleanPath = requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname;
     const filePath = path.resolve(root, `.${cleanPath}`);
     const relativePath = path.relative(root, filePath);
