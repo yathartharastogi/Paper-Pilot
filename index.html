@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111311" />
+    <title>PaperPilot — Read beyond the abstract.</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Paper workspace">
+        <a class="brand" href="/"><span class="brand-mark">P</span><span>paperpilot</span></a>
+
+        <button class="new-paper" id="newPaperButton"><span>+</span> New paper</button>
+        <input id="fileInput" type="file" accept="application/pdf" hidden />
+
+        <div class="sidebar-section">
+          <p class="nav-label">Workspace</p>
+          <button class="rail-item active" id="overviewRail"><span>◈</span> Current paper</button>
+          <button class="rail-item" id="sourceRail"><span>▤</span> Source PDF</button>
+        </div>
+
+        <div class="sidebar-paper" id="sidebarPaper" hidden>
+          <span class="nav-label">Analysing</span>
+          <strong id="sidebarPaperTitle"></strong>
+          <p id="sidebarPaperMeta"></p>
+        </div>
+
+        <div class="sidebar-note">
+          <span class="note-icon">✓</span>
+          <p>Answers stay inside your paper. Every answer must point back to a page.</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div class="topbar-left"><span class="eyebrow-dot"></span><span id="topbarStatus">Local paper workspace</span></div>
+          <div class="topbar-actions">
+            <span class="model-label">Gemini 3.5 Flash</span>
+            <button class="theme-button" id="themeButton" aria-label="Switch to light theme"><span id="themeButtonIcon">☼</span><span id="themeButtonText">Light</span></button>
+          </div>
+        </header>
+
+        <section class="welcome" id="welcomeView">
+          <p class="section-kicker">Research, with receipts.</p>
+          <h1>Understand the paper<br><em>behind</em> the abstract.</h1>
+          <p class="welcome-copy">Upload a research paper for a source-bound overview, evidence check, concept map, and focused discussion.</p>
+          <label class="upload-surface" id="dropzone" for="welcomeFileInput">
+            <input id="welcomeFileInput" type="file" accept="application/pdf" hidden />
+            <span class="upload-glyph">↥</span>
+            <span><strong>Choose a PDF</strong><small>or drop one here · 20 MB max</small></span>
+            <span class="upload-arrow">→</span>
+          </label>
+          <p class="privacy-note">Your key remains server-side. Your PDF is only sent to Gemini to generate this analysis.</p>
+        </section>
+
+        <section class="paper-workspace" id="paperWorkspace" hidden>
+          <div class="paper-head">
+            <div>
+              <p class="ready-label"><span></span> Grounded analysis</p>
+              <h1 id="paperTitle">Untitled paper</h1>
+              <p class="paper-meta" id="paperMeta"></p>
+            </div>
+            <button class="quiet-button with-label" id="replacePaperButton">↥ Replace paper</button>
+          </div>
+
+          <div class="tab-bar" role="tablist" aria-label="Analysis views">
+            <button class="tab active" data-view="overview" role="tab" aria-selected="true">Overview</button>
+            <button class="tab" data-view="evidence" role="tab" aria-selected="false">Evidence</button>
+            <button class="tab" data-view="novelty" role="tab" aria-selected="false">Novelty</button>
+            <button class="tab" data-view="gaps" role="tab" aria-selected="false">Research gaps</button>
+            <button class="tab" data-view="debate" role="tab" aria-selected="false">Debate</button>
+            <button class="tab" data-view="map" role="tab" aria-selected="false">Concept map</button>
+            <button class="tab" data-view="ask" role="tab" aria-selected="false">Ask paper</button>
+          </div>
+
+          <div class="content-grid">
+            <section class="analysis-panel">
+              <div class="panel-heading">
+                <div><p class="section-kicker" id="sectionKicker">Paper overview</p><h2 id="sectionTitle">The essential read</h2></div>
+                <span class="verified-badge">✓ Source bound</span>
+              </div>
+              <div id="viewContent"></div>
+            </section>
+
+            <aside class="source-panel" id="sourcePanel">
+              <div class="source-topline"><span>Paper source</span><button id="openPdfButton" aria-label="Open source PDF in a new tab">↗</button></div>
+              <div class="pdf-frame"><iframe id="pdfViewer" title="Uploaded paper PDF"></iframe></div>
+              <div class="source-caption"><span class="citation-chip dark" id="sourceCitation">source</span><span id="sourceLabel">Select a citation to jump to the page</span></div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="loading-dialog" id="loadingDialog">
+      <div class="loading-card">
+        <span class="loading-mark">P</span>
+        <p class="section-kicker">Preparing your workspace</p>
+        <h2 id="loadingTitle">Reading the paper</h2>
+        <p id="loadingDetail">Finding the paper's central argument and evidence.</p>
+        <div class="progress-line"><span></span></div>
+        <p class="loading-hint">This can take a moment for dense papers.</p>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
