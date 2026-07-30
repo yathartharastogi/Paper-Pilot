@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111311" />
     <title>PaperPilot — Read beyond the abstract.</title>
-    <link rel="stylesheet" href="styles.css?build=20260731v4" />
+    <link rel="stylesheet" href="styles.css?build=ui20260731v4" />
   </head>
-  <body>
+  <body data-theme="dark">
     <div class="app-shell">
       <aside class="sidebar" aria-label="Paper workspace">
         <a class="brand" href="/"><span class="brand-mark">P</span><span>paperpilot</span></a>
@@ -27,6 +27,11 @@
           <p id="sidebarPaperMeta"></p>
         </div>
 
+        <div class="paper-library" id="paperLibrary" hidden>
+          <span class="nav-label">Saved papers</span>
+          <div class="saved-paper-list" id="savedPaperList"></div>
+        </div>
+
         <div class="sidebar-note">
           <span class="note-icon">✓</span>
           <p>Answers stay inside your paper. Every answer must point back to a page.</p>
@@ -34,14 +39,6 @@
       </aside>
 
       <main class="workspace">
-        <header class="topbar">
-          <div class="topbar-left"><span class="eyebrow-dot"></span><span id="topbarStatus">Local paper workspace</span></div>
-          <div class="topbar-actions">
-            <span class="model-label">Gemini 3.5 Flash</span>
-            <button class="theme-button" id="themeButton" aria-label="Switch to light theme"><span id="themeButtonIcon">☼</span><span id="themeButtonText">Light</span></button>
-          </div>
-        </header>
-
         <section class="welcome" id="welcomeView">
           <p class="section-kicker">Research, with receipts.</p>
           <h1>Understand the paper<br><em>behind</em> the abstract.</h1>
@@ -62,7 +59,7 @@
               <h1 id="paperTitle">Untitled paper</h1>
               <p class="paper-meta" id="paperMeta"></p>
             </div>
-            <button class="quiet-button with-label" id="replacePaperButton">↥ Replace paper</button>
+            <button class="quiet-button with-label" id="replacePaperButton">↥ Add another paper</button>
           </div>
 
           <div class="tab-bar" role="tablist" aria-label="Analysis views">
@@ -115,6 +112,6 @@
       }
     </script>
     <script type="module" src="universe/universe-bridge.js?build=20260731v4"></script>
-    <script src="app.js?build=20260731v4"></script>
+    <script src="app.js?build=20260731v8"></script>
   </body>
 </html>
