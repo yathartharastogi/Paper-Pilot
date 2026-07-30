@@ -1,4 +1,4 @@
-const state = { paperId: null, analysis: null, graph: null, pdfUrl: null, activeView: 'overview', selectedNode: null };
+const state = { paperId: null, localPaperId: null, analysis: null, graph: null, pdfUrl: null, activeView: 'overview', selectedNode: null, savedPapers: [] };
 let universePanel = null;
 
 const viewContent = document.querySelector('#viewContent');
@@ -13,32 +13,59 @@ const tabs = [...document.querySelectorAll('.tab')];
 const DB_NAME = 'paperpilot-workspace';
 const DB_VERSION = 1;
 const ACTIVE_PAPER_KEY = 'active-paper';
+const ACTIVE_PAPER_STORAGE_KEY = 'paperpilot-active-paper-id';
+let pdfNavigationTimer = null;
 
 function openPaperStore() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => request.result.createObjectStore('papers', { keyPath: 'id' });
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('papers')) request.result.createObjectStore('papers', { keyPath: 'id' });
+    };
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
   });
 }
 
 async function savePaperLocally(file) {
+  const record = {
+    id: state.localPaperId || crypto.randomUUID(),
+    file,
+    analysis: state.analysis,
+    graph: state.graph,
+    savedAt: Date.now(),
+  };
+  state.localPaperId = record.id;
   const database = await openPaperStore();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction('papers', 'readwrite');
-    transaction.objectStore('papers').put({ id: ACTIVE_PAPER_KEY, file, analysis: state.analysis, graph: state.graph, savedAt: Date.now() });
-    transaction.oncomplete = () => resolve();
+    transaction.objectStore('papers').put(record);
+    transaction.oncomplete = () => {
+      localStorage.setItem(ACTIVE_PAPER_STORAGE_KEY, record.id);
+      resolve(record);
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }
 
-async function readSavedPaper() {
+async function readSavedPaper(id) {
   const database = await openPaperStore();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction('papers', 'readonly');
-    const request = transaction.objectStore('papers').get(ACTIVE_PAPER_KEY);
+    const request = transaction.objectStore('papers').get(id);
     request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function listSavedPapers() {
+  const database = await openPaperStore();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction('papers', 'readonly');
+    const request = transaction.objectStore('papers').getAll();
+    request.onsuccess = () => resolve((request.result || [])
+      .filter(paper => paper?.file && paper?.analysis)
+      .sort((first, second) => Number(second.savedAt || 0) - Number(first.savedAt || 0)));
     request.onerror = () => reject(request.error);
   });
 }
@@ -50,15 +77,6 @@ function fileAsDataUrl(file) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
-}
-
-function applyTheme(theme) {
-  const selected = theme === 'light' ? 'light' : 'dark';
-  document.body.dataset.theme = selected;
-  localStorage.setItem('paperpilot-theme', selected);
-  document.querySelector('#themeButtonText').textContent = selected === 'dark' ? 'Light' : 'Dark';
-  document.querySelector('#themeButtonIcon').textContent = selected === 'dark' ? '☼' : '☾';
-  document.querySelector('#themeButton').setAttribute('aria-label', `Switch to ${selected === 'dark' ? 'light' : 'dark'} theme`);
 }
 
 function escapeHtml(value) {
@@ -75,11 +93,25 @@ function citation(page, label) {
   return `<button class="citation-chip" data-page="${Number(page)}" data-label="${escapeHtml(label)}">p. ${Number(page)} ↗</button>`;
 }
 
+function activePdfUrl() {
+  return state.paperId ? `/api/papers/${encodeURIComponent(state.paperId)}.pdf` : state.pdfUrl;
+}
+
+function showPdfPage(page) {
+  const pdfUrl = activePdfUrl();
+  if (!pdfUrl) return;
+  const safePage = Number(page) || 1;
+  window.clearTimeout(pdfNavigationTimer);
+  pdfNavigationTimer = window.setTimeout(() => {
+    pdfViewer.src = `${pdfUrl}#page=${safePage}`;
+  }, 0);
+}
+
 function setSource(page, label) {
   const safePage = Number(page) || 1;
   sourceCitation.textContent = `p. ${safePage}`;
   sourceLabel.textContent = label || 'Source citation';
-  if (state.pdfUrl) pdfViewer.src = `${state.pdfUrl}#page=${safePage}`;
+  showPdfPage(safePage);
   document.querySelector('#sourcePanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -96,8 +128,26 @@ function displayPaper(analysis) {
   const meta = [analysis.authors, analysis.year, analysis.pages].filter(Boolean).join(' · ');
   document.querySelector('#paperMeta').textContent = meta;
   document.querySelector('#sidebarPaperMeta').textContent = meta || 'Ready to explore';
-  document.querySelector('#topbarStatus').textContent = 'Grounded paper workspace';
   renderView('overview');
+}
+
+function savedPaperLabel(title) {
+  const cleanTitle = String(title || 'Untitled paper').trim();
+  return cleanTitle.length > 30 ? `${cleanTitle.slice(0, 27).trimEnd()}…` : cleanTitle;
+}
+
+function renderSavedPaperList(papers = state.savedPapers) {
+  const library = document.querySelector('#paperLibrary');
+  const list = document.querySelector('#savedPaperList');
+  library.hidden = papers.length === 0;
+  list.innerHTML = papers.map(paper => {
+    const title = paper.analysis?.title || 'Untitled paper';
+    return `
+      <button class="saved-paper ${paper.id === state.localPaperId ? 'active' : ''}" data-paper-id="${escapeHtml(paper.id)}" title="Open ${escapeHtml(title)}" aria-label="Open ${escapeHtml(title)}">
+        <strong>${escapeHtml(savedPaperLabel(title))}</strong>
+      </button>`;
+  }).join('');
+  list.querySelectorAll('[data-paper-id]').forEach(button => button.addEventListener('click', () => switchSavedPaper(button.dataset.paperId)));
 }
 
 function localId(prefix, value) {
@@ -412,12 +462,15 @@ async function analyseFile(file) {
       if (!response.ok) throw new Error(result.error || 'The paper could not be analysed.');
       if (state.pdfUrl) URL.revokeObjectURL(state.pdfUrl);
       state.paperId = result.paperId;
+      state.localPaperId = crypto.randomUUID();
       state.analysis = result.analysis;
       state.graph = result.graph || null;
       state.pdfUrl = URL.createObjectURL(file);
-      pdfViewer.src = `${state.pdfUrl}#page=1`;
+      showPdfPage(1);
       displayPaper(result.analysis);
       await savePaperLocally(file);
+      state.savedPapers = await listSavedPapers();
+      renderSavedPaperList();
       showToast('Your paper is ready to explore.');
     } catch (error) {
       showToast(error.message || 'Something went wrong while analysing the paper.');
@@ -428,31 +481,52 @@ async function analyseFile(file) {
   reader.readAsDataURL(file);
 }
 
+async function restorePaperSession(saved) {
+  const data = await fileAsDataUrl(saved.file);
+  const response = await fetch('/api/session', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: saved.file.name, mimeType: saved.file.type, data, analysis: saved.analysis }),
+  });
+  const session = await response.json();
+  if (!response.ok) throw new Error(session.error || 'The source session could not be restored.');
+  state.paperId = session.paperId;
+  state.graph = session.graph || state.graph;
+  showPdfPage(Number(sourceCitation.textContent.replace(/\D+/g, '')) || 1);
+  if (state.activeView === 'universe') renderView('universe');
+}
+
+async function switchSavedPaper(id, { announce = true } = {}) {
+  const saved = await readSavedPaper(id);
+  if (!saved?.file || !saved?.analysis) return;
+  if (state.pdfUrl) URL.revokeObjectURL(state.pdfUrl);
+  state.localPaperId = saved.id;
+  state.analysis = saved.analysis;
+  state.graph = saved.graph?.nodes?.length ? saved.graph : graphFromSavedAnalysis(saved.analysis);
+  state.paperId = null;
+  state.pdfUrl = URL.createObjectURL(saved.file);
+  showPdfPage(1);
+  localStorage.setItem(ACTIVE_PAPER_STORAGE_KEY, saved.id);
+  displayPaper(saved.analysis);
+  renderSavedPaperList();
+  try {
+    await restorePaperSession(saved);
+    if (announce) showToast('Opened saved paper.');
+  } catch (error) {
+    if (announce) showToast('Paper opened. Re-upload it to use Q&A if the server was restarted.');
+  }
+}
+
 async function restoreSavedPaper() {
   try {
-    const saved = await readSavedPaper();
-    if (!saved?.file || !saved?.analysis) return;
-    state.analysis = saved.analysis;
-    state.graph = saved.graph?.nodes?.length ? saved.graph : graphFromSavedAnalysis(saved.analysis);
-    state.paperId = null;
-    state.pdfUrl = URL.createObjectURL(saved.file);
-    pdfViewer.src = `${state.pdfUrl}#page=1`;
-    displayPaper(saved.analysis);
-    document.querySelector('#topbarStatus').textContent = 'Restoring saved workspace';
-    const data = await fileAsDataUrl(saved.file);
-    const response = await fetch('/api/session', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: saved.file.name, mimeType: saved.file.type, data, analysis: saved.analysis }),
-    });
-    const session = await response.json();
-    if (!response.ok) throw new Error(session.error || 'The source session could not be restored.');
-    state.paperId = session.paperId;
-    state.graph = session.graph || null;
-    document.querySelector('#topbarStatus').textContent = 'Restored paper workspace';
-    if (state.activeView === 'universe') renderView('universe');
-    showToast('Your saved paper is ready.');
+    state.savedPapers = await listSavedPapers();
+    renderSavedPaperList();
+    const activeId = localStorage.getItem(ACTIVE_PAPER_STORAGE_KEY);
+    const saved = state.savedPapers.find(paper => paper.id === activeId)
+      || state.savedPapers.find(paper => paper.id === ACTIVE_PAPER_KEY)
+      || state.savedPapers[0];
+    if (!saved) return;
+    await switchSavedPaper(saved.id, { announce: true });
   } catch (error) {
-    document.querySelector('#topbarStatus').textContent = 'Saved paper source view';
     showToast('Your paper is visible. Re-upload it to use Q&A if the server was restarted.');
   }
 }
@@ -469,7 +543,7 @@ document.querySelector('#dropzone').addEventListener('drop', event => { event.pr
 tabs.forEach(tab => tab.addEventListener('click', () => renderView(tab.dataset.view)));
 document.querySelector('#sourceRail').addEventListener('click', () => { if (!state.analysis) return showToast('Upload a paper to view its source.'); document.querySelector('#sourcePanel').scrollIntoView({ behavior: 'smooth' }); });
 document.querySelector('#overviewRail').addEventListener('click', () => { if (state.analysis) renderView('overview'); else window.scrollTo({ top: 0, behavior: 'smooth' }); });
-document.querySelector('#openPdfButton').addEventListener('click', () => { if (state.pdfUrl) window.open(pdfViewer.src || state.pdfUrl, '_blank', 'noopener'); });
-document.querySelector('#themeButton').addEventListener('click', () => applyTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark'));
-applyTheme(localStorage.getItem('paperpilot-theme') || 'dark');
+document.querySelector('#openPdfButton').addEventListener('click', () => { const pdfUrl = activePdfUrl(); if (pdfUrl) window.open(`${pdfUrl}#page=1`, '_blank', 'noopener'); });
+localStorage.removeItem('paperpilot-theme');
+document.body.dataset.theme = 'dark';
 restoreSavedPaper();
