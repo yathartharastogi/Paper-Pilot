@@ -2,12 +2,24 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { buildResearchGraph, explorationPrompt } = require('./services/research-graph-service');
+const {
+  isHighStakesQuery,
+  normalizeGraph,
+  sanitizeResearchQuery,
+  validateTraversalResponse,
+} = require('./lib/graph-data');
 
 const root = __dirname;
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_JSON_BYTES = Math.ceil(MAX_UPLOAD_BYTES * 1.38) + 1024 * 1024;
 const papers = new Map();
-const types = { '.css': 'text/css', '.js': 'text/javascript', '.html': 'text/html' };
+const types = {
+  '.css': 'text/css',
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+};
 
 loadEnvironment();
 
@@ -147,8 +159,9 @@ async function handleAnalyze(req, res) {
   const paperId = crypto.randomUUID();
   const pdf = { data, mimeType: body.mimeType, originalName: String(body.name || 'Untitled paper.pdf') };
   const analysis = parseModelJson(await askGemini({ prompt: analysisPrompt, pdf }));
-  papers.set(paperId, { pdf, analysis, createdAt: Date.now() });
-  json(res, 200, { paperId, analysis });
+  const graph = buildResearchGraph(paperId, analysis);
+  papers.set(paperId, { pdf, analysis, graph, createdAt: Date.now() });
+  json(res, 200, { paperId, analysis, graph });
 }
 
 async function handleRestoreSession(req, res) {
@@ -158,12 +171,15 @@ async function handleRestoreSession(req, res) {
   if (!data || bytes.length === 0 || bytes.length > MAX_UPLOAD_BYTES) throw new Error('The saved PDF could not be restored.');
   if (body.mimeType !== 'application/pdf') throw new Error('PaperPilot currently accepts PDF files only.');
   const paperId = crypto.randomUUID();
+  const analysis = body.analysis && typeof body.analysis === 'object' ? body.analysis : null;
+  const graph = analysis ? buildResearchGraph(paperId, analysis) : normalizeGraph({});
   papers.set(paperId, {
     pdf: { data, mimeType: body.mimeType, originalName: String(body.name || 'Saved paper.pdf') },
-    analysis: null,
+    analysis,
+    graph,
     createdAt: Date.now(),
   });
-  json(res, 200, { paperId });
+  json(res, 200, { paperId, graph });
 }
 
 async function handleQuestion(req, res) {
@@ -182,6 +198,38 @@ async function handleQuestion(req, res) {
   json(res, 200, response);
 }
 
+function handleResearchGraph(req, res) {
+  const requestUrl = new URL(req.url, 'http://localhost');
+  const paper = papers.get(requestUrl.searchParams.get('paperId'));
+  if (!paper?.graph?.nodes?.length) throw new Error('The research universe is not ready for this paper yet.');
+  json(res, 200, { graph: paper.graph });
+}
+
+async function handleResearchExplore(req, res) {
+  const body = await readJson(req);
+  const paper = papers.get(body.paperId);
+  if (!paper?.graph?.nodes?.length) throw new Error('The research universe is not ready for this paper yet.');
+  const query = sanitizeResearchQuery(body.query);
+  const modelResponse = parseModelJson(await askGemini({
+    prompt: explorationPrompt(query, paper.graph),
+    pdf: paper.pdf,
+  }));
+  const traversal = validateTraversalResponse(modelResponse, paper.graph);
+  traversal.query = query;
+  traversal.highStakesNotice = isHighStakesQuery(query);
+  const hasResearchEntity = traversal.steps.some(step => {
+    const node = paper.graph.nodes.find(item => item.id === step.nodeId);
+    return node && node.type !== 'paper';
+  });
+  if (traversal.confidence === 0 || !hasResearchEntity || !traversal.citations.length) {
+    traversal.summary = "This paper doesn't address that.";
+    traversal.confidence = 0;
+    traversal.steps = [];
+    traversal.citations = [];
+  }
+  json(res, 200, traversal);
+}
+
 async function handleHealth(_req, res) {
   json(res, 200, {
     configured: Boolean(process.env.GEMINI_API_KEY),
@@ -189,25 +237,38 @@ async function handleHealth(_req, res) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
-  try {
+function createServer() {
+  return http.createServer(async (req, res) => {
+    try {
     if (req.method === 'GET' && req.url === '/api/health') return handleHealth(req, res);
     if (req.method === 'POST' && req.url === '/api/analyze') return await handleAnalyze(req, res);
     if (req.method === 'POST' && req.url === '/api/session') return await handleRestoreSession(req, res);
     if (req.method === 'POST' && req.url === '/api/question') return await handleQuestion(req, res);
+    if (req.method === 'GET' && req.url.startsWith('/api/research/graph')) return handleResearchGraph(req, res);
+    if (req.method === 'POST' && req.url === '/api/research/explore') return await handleResearchExplore(req, res);
 
-    const cleanPath = req.url === '/' ? '/index.html' : req.url.split('?')[0];
+    const requestUrl = new URL(req.url, 'http://localhost');
+    const cleanPath = requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname;
     const filePath = path.resolve(root, `.${cleanPath}`);
-    if (!filePath.startsWith(root) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    const relativePath = path.relative(root, filePath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       res.writeHead(404);
       res.end('Not found');
       return;
     }
-    res.writeHead(200, { 'Content-Type': `${types[path.extname(filePath)] || 'text/plain'}; charset=utf-8` });
+    res.writeHead(200, {
+      'Content-Type': `${types[path.extname(filePath)] || 'text/plain'}; charset=utf-8`,
+      'Cache-Control': 'no-store, max-age=0',
+    });
     fs.createReadStream(filePath).pipe(res);
-  } catch (error) {
-    json(res, 400, { error: error instanceof Error ? error.message : 'Something went wrong.' });
-  }
-});
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : 'Something went wrong.' });
+    }
+  });
+}
 
-server.listen(process.env.PORT || 4173, () => console.log('PaperPilot running at http://localhost:4173'));
+if (require.main === module) {
+  createServer().listen(process.env.PORT || 4173, () => console.log('PaperPilot running at http://localhost:4173'));
+}
+
+module.exports = { createServer, handleResearchExplore };
