@@ -70,6 +70,16 @@ async function listSavedPapers() {
   });
 }
 
+async function deletePaperLocally(id) {
+  const database = await openPaperStore();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction('papers', 'readwrite');
+    transaction.objectStore('papers').delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
 function fileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -143,11 +153,15 @@ function renderSavedPaperList(papers = state.savedPapers) {
   list.innerHTML = papers.map(paper => {
     const title = paper.analysis?.title || 'Untitled paper';
     return `
-      <button class="saved-paper ${paper.id === state.localPaperId ? 'active' : ''}" data-paper-id="${escapeHtml(paper.id)}" title="Open ${escapeHtml(title)}" aria-label="Open ${escapeHtml(title)}">
-        <strong>${escapeHtml(savedPaperLabel(title))}</strong>
-      </button>`;
+      <div class="saved-paper-row">
+        <button class="saved-paper ${paper.id === state.localPaperId ? 'active' : ''}" data-paper-id="${escapeHtml(paper.id)}" title="Open ${escapeHtml(title)}" aria-label="Open ${escapeHtml(title)}">
+          <strong>${escapeHtml(savedPaperLabel(title))}</strong>
+        </button>
+        <button class="delete-paper" data-delete-paper-id="${escapeHtml(paper.id)}" title="Delete ${escapeHtml(title)}" aria-label="Delete ${escapeHtml(title)}">×</button>
+      </div>`;
   }).join('');
   list.querySelectorAll('[data-paper-id]').forEach(button => button.addEventListener('click', () => switchSavedPaper(button.dataset.paperId)));
+  list.querySelectorAll('[data-delete-paper-id]').forEach(button => button.addEventListener('click', () => deleteSavedPaper(button.dataset.deletePaperId)));
 }
 
 function localId(prefix, value) {
@@ -514,6 +528,47 @@ async function switchSavedPaper(id, { announce = true } = {}) {
   } catch (error) {
     if (announce) showToast('Paper opened. Re-upload it to use Q&A if the server was restarted.');
   }
+}
+
+function showWelcomeScreen() {
+  universePanel?.destroy();
+  universePanel = null;
+  if (state.pdfUrl) URL.revokeObjectURL(state.pdfUrl);
+  state.paperId = null;
+  state.localPaperId = null;
+  state.analysis = null;
+  state.graph = null;
+  state.pdfUrl = null;
+  state.activeView = 'overview';
+  state.selectedNode = null;
+  pdfViewer.src = 'about:blank';
+  document.querySelector('#welcomeView').hidden = false;
+  document.querySelector('#paperWorkspace').hidden = true;
+  document.querySelector('#sidebarPaper').hidden = true;
+}
+
+async function deleteSavedPaper(id) {
+  const saved = state.savedPapers.find(paper => paper.id === id);
+  if (!saved) return;
+  const title = saved.analysis?.title || 'this paper';
+  if (!window.confirm(`Delete “${title}” from your saved papers?`)) return;
+  const wasActive = id === state.localPaperId;
+  await deletePaperLocally(id);
+  state.savedPapers = state.savedPapers.filter(paper => paper.id !== id);
+  if (localStorage.getItem(ACTIVE_PAPER_STORAGE_KEY) === id) localStorage.removeItem(ACTIVE_PAPER_STORAGE_KEY);
+  renderSavedPaperList();
+  if (!wasActive) {
+    showToast('Saved paper deleted.');
+    return;
+  }
+  const nextPaper = state.savedPapers[0];
+  if (nextPaper) {
+    await switchSavedPaper(nextPaper.id, { announce: false });
+    showToast('Saved paper deleted.');
+    return;
+  }
+  showWelcomeScreen();
+  showToast('Saved paper deleted.');
 }
 
 async function restoreSavedPaper() {
