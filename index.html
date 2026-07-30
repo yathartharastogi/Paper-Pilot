@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111311" />
     <title>PaperPilot — Read beyond the abstract.</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?build=20260731v4" />
   </head>
   <body>
     <div class="app-shell">
@@ -71,6 +71,7 @@
             <button class="tab" data-view="novelty" role="tab" aria-selected="false">Novelty</button>
             <button class="tab" data-view="gaps" role="tab" aria-selected="false">Research gaps</button>
             <button class="tab" data-view="debate" role="tab" aria-selected="false">Debate</button>
+            <button class="tab" data-view="universe" role="tab" aria-selected="false">Universe</button>
             <button class="tab" data-view="map" role="tab" aria-selected="false">Concept map</button>
             <button class="tab" data-view="ask" role="tab" aria-selected="false">Ask paper</button>
           </div>
@@ -106,6 +107,14 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="app.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js"
+        }
+      }
+    </script>
+    <script type="module" src="universe/universe-bridge.js?build=20260731v4"></script>
+    <script src="app.js?build=20260731v4"></script>
   </body>
 </html>

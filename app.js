@@ -1,4 +1,5 @@
-const state = { paperId: null, analysis: null, pdfUrl: null, activeView: 'overview', selectedNode: null };
+const state = { paperId: null, analysis: null, graph: null, pdfUrl: null, activeView: 'overview', selectedNode: null };
+let universePanel = null;
 
 const viewContent = document.querySelector('#viewContent');
 const sectionKicker = document.querySelector('#sectionKicker');
@@ -26,7 +27,7 @@ async function savePaperLocally(file) {
   const database = await openPaperStore();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction('papers', 'readwrite');
-    transaction.objectStore('papers').put({ id: ACTIVE_PAPER_KEY, file, analysis: state.analysis, savedAt: Date.now() });
+    transaction.objectStore('papers').put({ id: ACTIVE_PAPER_KEY, file, analysis: state.analysis, graph: state.graph, savedAt: Date.now() });
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -97,6 +98,81 @@ function displayPaper(analysis) {
   document.querySelector('#sidebarPaperMeta').textContent = meta || 'Ready to explore';
   document.querySelector('#topbarStatus').textContent = 'Grounded paper workspace';
   renderView('overview');
+}
+
+function localId(prefix, value) {
+  let hash = 2166136261;
+  const text = String(value || 'untitled');
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return prefix + '-' + (hash >>> 0).toString(36);
+}
+
+function localPosition(index, total, radius) {
+  const angle = index * 2.399963229728653;
+  const ring = radius * (0.55 + (index % 4) * 0.12);
+  return {
+    x: Math.cos(angle) * ring,
+    y: Math.sin(angle) * ring * 0.62,
+    z: ((index % 5) - 2) * Math.max(1.6, total * 0.08),
+  };
+}
+
+function graphFromSavedAnalysis(analysis) {
+  const sourceId = 'saved-paper';
+  const paperNodeId = 'paper:saved-paper';
+  const data = analysis || {};
+  const nodes = [{
+    id: paperNodeId,
+    type: 'paper',
+    label: data.title || 'Saved paper',
+    description: data.overview?.oneLiner || 'Restored paper source.',
+    confidence: 1,
+    sourcePaperIds: [sourceId],
+    citation: { paperId: sourceId, page: 1, label: 'Paper source' },
+    evidenceQuality: 'source',
+    uncertainty: 0,
+    position: { x: 0, y: 0, z: 0 },
+  }];
+  const edges = [];
+  const addNode = (type, item, index, label, description, page, evidenceQuality, uncertainty = 0) => {
+    const id = localId(type, String(label || '') + '-' + String(index));
+    nodes.push({
+      id,
+      type,
+      label: label || 'Untitled research entity',
+      description: description || '',
+      confidence: type === 'question' ? 0.35 : 0.68,
+      sourcePaperIds: [sourceId],
+      citation: { paperId: sourceId, page: Number(page) || 1, label: item.label || item.labelSource || 'Source location' },
+      evidenceQuality: evidenceQuality || 'extracted',
+      uncertainty,
+      position: localPosition(nodes.length, 24, type === 'claim' ? 13 : 9),
+    });
+    edges.push({
+      id: localId('edge', paperNodeId + '-' + id),
+      sourceId: paperNodeId,
+      targetId: id,
+      relationType: type === 'question' ? 'raises_question' : type === 'claim' ? 'supports' : 'investigates',
+      label: type === 'question' ? 'open question in the paper' : 'source-linked entity',
+      weight: 0.55,
+      confidence: type === 'question' ? 0.45 : 0.68,
+      supportingSourceIds: [sourceId],
+      citation: { paperId: sourceId, page: Number(page) || 1, label: item.label || item.labelSource || 'Source location' },
+      inference: false,
+    });
+  };
+  (data.conceptMap?.nodes || []).forEach((item, index) => addNode('concept', item, index, item.label, item.summary, item.page, 'extracted concept'));
+  (data.claims || []).forEach((item, index) => addNode('claim', item, index, item.claim, item.reason, item.page, item.evidence));
+  (data.researchGaps || []).forEach((item, index) => addNode('question', item, index, item.gap, item.reason, item.page, item.type || 'open question', 0.85));
+  return {
+    version: 1,
+    papers: [{ id: sourceId, title: data.title || 'Saved paper', authors: data.authors || '', year: data.year || '', ingestionStatus: 'restored' }],
+    nodes,
+    edges,
+  };
 }
 
 function renderOverview() {
@@ -174,7 +250,7 @@ function renderConversation(mode) {
 
 function renderMap() {
   const map = state.analysis.conceptMap || { nodes: [], links: [] };
-  const nodes = map.nodes || [];
+  const nodes = layoutMapNodes(map.nodes || []);
   const links = map.links || [];
   state.selectedNode = state.selectedNode || nodes[0]?.id || null;
   return `
@@ -188,7 +264,50 @@ function renderMap() {
     <div class="node-detail" id="nodeDetail"></div>`;
 }
 
+function renderUniverse() {
+  if (!state.graph?.nodes?.length) {
+    return '<div class="empty-analysis"><p>The neural universe is preparing its source-grounded regions. Switch away and back once processing completes.</p></div>';
+  }
+  return '<div id="universeRoot"></div>';
+}
+
+function mountUniverseView(attempt = 0) {
+  if (state.activeView !== 'universe') return;
+  const root = document.querySelector('#universeRoot');
+  if (!root || !state.graph?.nodes?.length) return;
+  if (!window.PaperPilotUniverse?.UniversePanel) {
+    if (attempt < 20) window.setTimeout(() => mountUniverseView(attempt + 1), 80);
+    return;
+  }
+  universePanel?.destroy();
+  universePanel = new window.PaperPilotUniverse.UniversePanel({
+    root,
+    paperId: state.paperId,
+    graph: state.graph,
+    sourceReady: Boolean(state.paperId),
+    onCitation: setSource,
+  });
+  universePanel.mount();
+}
+
 function clamp(value, min, max) { return Math.min(max, Math.max(min, Number(value) || min)); }
+function layoutMapNodes(nodes) {
+  const occupied = new Set();
+  return nodes.map((node, index) => {
+    let x = Number(node.x);
+    let y = Number(node.y);
+    const usable = Number.isFinite(x) && Number.isFinite(y) && x >= 8 && x <= 92 && y >= 8 && y <= 88;
+    const key = String(Math.round(x)) + ':' + String(Math.round(y));
+    if (!usable || occupied.has(key)) {
+      const angle = index * 2.399963229728653;
+      const radius = 16 + (index % 4) * 8;
+      x = 50 + Math.cos(angle) * radius * 1.32;
+      y = 49 + Math.sin(angle) * radius * 0.88;
+    }
+    occupied.add(String(Math.round(x)) + ':' + String(Math.round(y)));
+    return { ...node, x: clamp(x, 8, 92), y: clamp(y, 8, 88) };
+  });
+}
 function nodeIcon(type) { return ({ problem: '!', method: '↳', result: '↗', evidence: '✓', limitation: '△' })[type] || '•'; }
 function mapLine(link, nodes) {
   const source = nodes.find(node => node.id === link.source);
@@ -216,13 +335,19 @@ function wireMap() {
 
 function renderView(view) {
   if (!state.analysis) return;
+  if (universePanel && view !== 'universe') {
+    universePanel.destroy();
+    universePanel = null;
+  }
   state.activeView = view;
+  document.querySelector('#paperWorkspace').classList.toggle('universe-active', view === 'universe');
   const headers = {
     overview: ['Paper overview', 'The essential read'],
     evidence: ['Claims & evidence', 'What the paper can support'],
     novelty: ['Novelty checker', 'What this paper differentiates'],
     gaps: ['Research-gap analyzer', 'What remains open'],
     debate: ['Evidence-based debate', 'Make the case'],
+    universe: ['Neural research universe', 'Explore the paper as living evidence'],
     map: ['Interactive concept map', 'The paper, connected'],
     ask: ['Source-grounded Q&A', 'Ask about this paper'],
   };
@@ -233,10 +358,12 @@ function renderView(view) {
   if (view === 'novelty') viewContent.innerHTML = renderNovelty();
   if (view === 'gaps') viewContent.innerHTML = renderGaps();
   if (view === 'debate' || view === 'ask') viewContent.innerHTML = renderConversation(view);
+  if (view === 'universe') viewContent.innerHTML = renderUniverse();
   if (view === 'map') viewContent.innerHTML = renderMap();
   tabs.forEach(tab => { const active = tab.dataset.view === view; tab.classList.toggle('active', active); tab.setAttribute('aria-selected', active ? 'true' : 'false'); });
   wireCitations();
   if (view === 'map') wireMap();
+  if (view === 'universe') mountUniverseView();
   if (view === 'debate' || view === 'ask') document.querySelector('#chatForm').addEventListener('submit', submitQuestion);
 }
 
@@ -286,6 +413,7 @@ async function analyseFile(file) {
       if (state.pdfUrl) URL.revokeObjectURL(state.pdfUrl);
       state.paperId = result.paperId;
       state.analysis = result.analysis;
+      state.graph = result.graph || null;
       state.pdfUrl = URL.createObjectURL(file);
       pdfViewer.src = `${state.pdfUrl}#page=1`;
       displayPaper(result.analysis);
@@ -305,6 +433,8 @@ async function restoreSavedPaper() {
     const saved = await readSavedPaper();
     if (!saved?.file || !saved?.analysis) return;
     state.analysis = saved.analysis;
+    state.graph = saved.graph?.nodes?.length ? saved.graph : graphFromSavedAnalysis(saved.analysis);
+    state.paperId = null;
     state.pdfUrl = URL.createObjectURL(saved.file);
     pdfViewer.src = `${state.pdfUrl}#page=1`;
     displayPaper(saved.analysis);
@@ -312,12 +442,14 @@ async function restoreSavedPaper() {
     const data = await fileAsDataUrl(saved.file);
     const response = await fetch('/api/session', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: saved.file.name, mimeType: saved.file.type, data }),
+      body: JSON.stringify({ name: saved.file.name, mimeType: saved.file.type, data, analysis: saved.analysis }),
     });
     const session = await response.json();
     if (!response.ok) throw new Error(session.error || 'The source session could not be restored.');
     state.paperId = session.paperId;
+    state.graph = session.graph || null;
     document.querySelector('#topbarStatus').textContent = 'Restored paper workspace';
+    if (state.activeView === 'universe') renderView('universe');
     showToast('Your saved paper is ready.');
   } catch (error) {
     document.querySelector('#topbarStatus').textContent = 'Saved paper source view';
