@@ -19,6 +19,7 @@ const types = {
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.mjs': 'text/javascript',
+  '.json': 'application/json',
 };
 
 loadEnvironment();
@@ -267,19 +268,24 @@ function createServer() {
     if (req.method === 'GET' && req.url.startsWith('/api/research/graph')) return handleResearchGraph(req, res);
     if (req.method === 'POST' && req.url === '/api/research/explore') return await handleResearchExplore(req, res);
 
-    const cleanPath = requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname;
+    let cleanPath = requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname;
     const filePath = path.resolve(root, `.${cleanPath}`);
     const relativePath = path.relative(root, filePath);
     if (relativePath.startsWith('..') || path.isAbsolute(relativePath) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      res.writeHead(404);
-      res.end('Not found');
-      return;
+      if (req.method === 'GET' && !requestUrl.pathname.startsWith('/api/')) {
+        cleanPath = '/index.html';
+      } else {
+        res.writeHead(404);
+        res.end('Not found');
+        return;
+      }
     }
+    const safeFilePath = path.resolve(root, `.${cleanPath}`);
     res.writeHead(200, {
-      'Content-Type': `${types[path.extname(filePath)] || 'text/plain'}; charset=utf-8`,
+      'Content-Type': `${types[path.extname(safeFilePath)] || 'text/plain'}; charset=utf-8`,
       'Cache-Control': 'no-store, max-age=0',
     });
-    fs.createReadStream(filePath).pipe(res);
+    fs.createReadStream(safeFilePath).pipe(res);
     } catch (error) {
       json(res, 400, { error: error instanceof Error ? error.message : 'Something went wrong.' });
     }
@@ -287,7 +293,8 @@ function createServer() {
 }
 
 if (require.main === module) {
-  createServer().listen(process.env.PORT || 4173, () => console.log('PaperPilot running at http://localhost:4173'));
+  const port = process.env.PORT || 4173;
+  createServer().listen(port, '0.0.0.0', () => console.log(`PaperPilot running on port ${port}`));
 }
 
 module.exports = { createServer, handleResearchExplore };
