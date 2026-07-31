@@ -2,6 +2,10 @@
 
 > Turn a dense research PDF into an interactive, source-bound research workspace.
 
+![](media/1.jpeg)
+
+![](media/2.jpeg)
+
 Paper Pilot helps readers move beyond a summary. Upload a paper and explore its argument, evidence, novelty, limitations, and core concepts - while keeping every answer tied back to the source.
 
 It is built for students, researchers, and anyone who wants to understand a paper quickly without losing the ability to verify what the paper actually says.
@@ -28,10 +32,6 @@ It is built for students, researchers, and anyone who wants to understand a pape
 | **Question tracing** | Traces a research question through a visible, saved sequence of source-linked graph nodes. |
 | **Flashcards** | Builds quick review prompts from the paper and presents them in animated flip cards. |
 | **Paper library** | Persists multiple uploaded papers locally, restores them after refresh, and supports deletion from history. |
-
-## Screenshots
-
-Final product screenshots will be added here after the demo captures are ready.
 
 ## How it works
 
