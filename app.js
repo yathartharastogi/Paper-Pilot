@@ -1,9 +1,7 @@
-const state = { paperId: null, localPaperId: null, analysis: null, graph: null, pdfUrl: null, activeView: 'overview', selectedNode: null, savedPapers: [] };
+const state = { paperId: null, localPaperId: null, analysis: null, graph: null, pdfUrl: null, activeView: 'overview', selectedNode: null, savedPapers: [], flashcardIndex: 0, flashcardFlipped: false };
 let universePanel = null;
 
 const viewContent = document.querySelector('#viewContent');
-const sectionKicker = document.querySelector('#sectionKicker');
-const sectionTitle = document.querySelector('#sectionTitle');
 const sourceLabel = document.querySelector('#sourceLabel');
 const sourceCitation = document.querySelector('#sourceCitation');
 const pdfViewer = document.querySelector('#pdfViewer');
@@ -130,9 +128,14 @@ function wireCitations() {
 }
 
 function displayPaper(analysis) {
+  document.body.classList.remove('landing-active');
+  document.querySelector('.sidebar').hidden = false;
+  document.querySelector('#landingView').hidden = true;
   document.querySelector('#welcomeView').hidden = true;
   document.querySelector('#paperWorkspace').hidden = false;
   document.querySelector('#sidebarPaper').hidden = false;
+  state.flashcardIndex = 0;
+  state.flashcardFlipped = false;
   document.querySelector('#paperTitle').textContent = analysis.title || 'Untitled paper';
   document.querySelector('#sidebarPaperTitle').textContent = analysis.title || 'Untitled paper';
   const meta = [analysis.authors, analysis.year, analysis.pages].filter(Boolean).join(' · ');
@@ -293,6 +296,65 @@ function renderGaps() {
       </article>`).join('')}</div>`;
 }
 
+function conciseFlashcardAnswer(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= 220) return text;
+  const boundary = text.lastIndexOf(' ', 205);
+  return `${text.slice(0, boundary > 120 ? boundary : 205).trimEnd()}…`;
+}
+
+function flashcardData() {
+  const overview = state.analysis?.overview || {};
+  const gap = (state.analysis?.researchGaps || [])[0];
+  return [
+    { label: 'Core problem', question: 'What problem does this paper set out to solve?', answer: conciseFlashcardAnswer(overview.problem?.text), source: overview.problem },
+    { label: 'Key contribution', question: 'What is the paper’s central contribution?', answer: conciseFlashcardAnswer(overview.contribution?.text), source: overview.contribution },
+    { label: 'Method', question: 'How does the paper approach the problem?', answer: conciseFlashcardAnswer(overview.method?.text), source: overview.method },
+    { label: 'Finding', question: 'What result should you remember?', answer: conciseFlashcardAnswer(overview.result?.text), source: overview.result },
+    gap ? { label: 'Open question', question: 'What remains open after this paper?', answer: conciseFlashcardAnswer(gap.gap || gap.reason), source: gap } : null,
+  ].filter(card => card?.answer);
+}
+
+function renderFlashcards() {
+  const cards = flashcardData();
+  if (!cards.length) return '<div class="empty-analysis"><p>Flashcards will appear once Paper Pilot has extracted the paper’s core overview.</p></div>';
+  state.flashcardIndex = ((state.flashcardIndex % cards.length) + cards.length) % cards.length;
+  const card = cards[state.flashcardIndex];
+  const source = card.source || {};
+  return `
+    <section class="flashcard-study" aria-label="Paper overview flashcards">
+      <div class="flashcard-heading"><div><p class="card-label">Rapid recall</p><h3>Test the paper’s essentials.</h3></div><span>${state.flashcardIndex + 1} / ${cards.length}</span></div>
+      <button class="flashcard ${state.flashcardFlipped ? 'flipped' : ''}" id="flashcardFlip" type="button" aria-pressed="${state.flashcardFlipped}" aria-label="Flip flashcard">
+        <span class="flashcard-inner">
+          <span class="flashcard-face flashcard-front"><small>${escapeHtml(card.label)}</small><strong>${escapeHtml(card.question)}</strong><em>Click to reveal <b>↗</b></em></span>
+          <span class="flashcard-face flashcard-back"><small>Answer</small><strong>${escapeHtml(card.answer)}</strong><em>${source.page ? `Source: p. ${Number(source.page)}` : 'Source-grounded overview'}</em></span>
+        </span>
+      </button>
+      <div class="flashcard-controls"><button type="button" id="flashcardPrevious" ${cards.length < 2 ? 'disabled' : ''}>← Previous</button><span>Flip it, then move on.</span><button type="button" id="flashcardNext" ${cards.length < 2 ? 'disabled' : ''}>Next →</button></div>
+    </section>`;
+}
+
+function wireFlashcards() {
+  const cards = flashcardData();
+  const flip = document.querySelector('#flashcardFlip');
+  if (!flip) return;
+  flip.addEventListener('click', () => {
+    state.flashcardFlipped = !state.flashcardFlipped;
+    flip.classList.toggle('flipped', state.flashcardFlipped);
+    flip.setAttribute('aria-pressed', String(state.flashcardFlipped));
+  });
+  document.querySelector('#flashcardPrevious')?.addEventListener('click', () => {
+    state.flashcardIndex = (state.flashcardIndex - 1 + cards.length) % cards.length;
+    state.flashcardFlipped = false;
+    renderView('flashcards');
+  });
+  document.querySelector('#flashcardNext')?.addEventListener('click', () => {
+    state.flashcardIndex = (state.flashcardIndex + 1) % cards.length;
+    state.flashcardFlipped = false;
+    renderView('flashcards');
+  });
+}
+
 function strengthClass(value) {
   if (value === 'strong') return 'strong';
   if (value === 'limited') return 'limited';
@@ -405,18 +467,6 @@ function renderView(view) {
   }
   state.activeView = view;
   document.querySelector('#paperWorkspace').classList.toggle('universe-active', view === 'universe');
-  const headers = {
-    overview: ['Paper overview', 'The essential read'],
-    evidence: ['Claims & evidence', 'What the paper can support'],
-    novelty: ['Novelty checker', 'What this paper differentiates'],
-    gaps: ['Research-gap analyzer', 'What remains open'],
-    debate: ['Evidence-based debate', 'Make the case'],
-    universe: ['Neural research universe', 'Explore the paper as living evidence'],
-    map: ['Interactive concept map', 'The paper, connected'],
-    ask: ['Source-grounded Q&A', 'Ask about this paper'],
-  };
-  sectionKicker.textContent = headers[view][0];
-  sectionTitle.textContent = headers[view][1];
   if (view === 'overview') viewContent.innerHTML = renderOverview();
   if (view === 'evidence') viewContent.innerHTML = renderEvidence();
   if (view === 'novelty') viewContent.innerHTML = renderNovelty();
@@ -424,9 +474,11 @@ function renderView(view) {
   if (view === 'debate' || view === 'ask') viewContent.innerHTML = renderConversation(view);
   if (view === 'universe') viewContent.innerHTML = renderUniverse();
   if (view === 'map') viewContent.innerHTML = renderMap();
+  if (view === 'flashcards') viewContent.innerHTML = renderFlashcards();
   tabs.forEach(tab => { const active = tab.dataset.view === view; tab.classList.toggle('active', active); tab.setAttribute('aria-selected', active ? 'true' : 'false'); });
   wireCitations();
   if (view === 'map') wireMap();
+  if (view === 'flashcards') wireFlashcards();
   if (view === 'universe') mountUniverseView();
   if (view === 'debate' || view === 'ask') document.querySelector('#chatForm').addEventListener('submit', submitQuestion);
 }
@@ -530,7 +582,10 @@ async function switchSavedPaper(id, { announce = true } = {}) {
   }
 }
 
-function showWelcomeScreen() {
+function showLandingScreen() {
+  document.body.classList.add('landing-active');
+  document.querySelector('.sidebar').hidden = true;
+  document.querySelector('#landingView').classList.remove('launching');
   universePanel?.destroy();
   universePanel = null;
   if (state.pdfUrl) URL.revokeObjectURL(state.pdfUrl);
@@ -541,10 +596,47 @@ function showWelcomeScreen() {
   state.pdfUrl = null;
   state.activeView = 'overview';
   state.selectedNode = null;
+  state.flashcardIndex = 0;
+  state.flashcardFlipped = false;
   pdfViewer.src = 'about:blank';
-  document.querySelector('#welcomeView').hidden = false;
+  document.querySelector('#landingView').hidden = false;
+  document.querySelector('#welcomeView').hidden = true;
   document.querySelector('#paperWorkspace').hidden = true;
   document.querySelector('#sidebarPaper').hidden = true;
+}
+
+function showUploadScreen() {
+  document.body.classList.remove('landing-active');
+  document.querySelector('.sidebar').hidden = false;
+  document.querySelector('#landingView').classList.remove('launching');
+  document.querySelector('#landingView').hidden = true;
+  document.querySelector('#welcomeView').hidden = false;
+  document.querySelector('#paperWorkspace').hidden = true;
+  const workspace = document.querySelector('.workspace');
+  workspace.classList.remove('app-reveal');
+  window.requestAnimationFrame(() => workspace.classList.add('app-reveal'));
+}
+
+async function launchApp() {
+  const landing = document.querySelector('#landingView');
+  if (landing.classList.contains('launching')) return;
+  landing.classList.add('launching');
+  document.querySelector('#landingStartButton').disabled = true;
+  window.setTimeout(async () => {
+    document.querySelector('#landingStartButton').disabled = false;
+    try {
+      if (!state.savedPapers.length) state.savedPapers = await listSavedPapers();
+      const activeId = state.localPaperId || localStorage.getItem(ACTIVE_PAPER_STORAGE_KEY);
+      const targetPaper = state.savedPapers.find(paper => paper.id === activeId) || state.savedPapers[0];
+      if (targetPaper) {
+        await switchSavedPaper(targetPaper.id, { announce: false });
+        return;
+      }
+    } catch (error) {
+      // A first-time visitor (or unavailable local storage) still reaches the upload flow.
+    }
+    showUploadScreen();
+  }, 820);
 }
 
 async function deleteSavedPaper(id) {
@@ -567,7 +659,7 @@ async function deleteSavedPaper(id) {
     showToast('Saved paper deleted.');
     return;
   }
-  showWelcomeScreen();
+  showLandingScreen();
   showToast('Saved paper deleted.');
 }
 
@@ -579,7 +671,10 @@ async function restoreSavedPaper() {
     const saved = state.savedPapers.find(paper => paper.id === activeId)
       || state.savedPapers.find(paper => paper.id === ACTIVE_PAPER_KEY)
       || state.savedPapers[0];
-    if (!saved) return;
+    if (!saved) {
+      showLandingScreen();
+      return;
+    }
     await switchSavedPaper(saved.id, { announce: true });
   } catch (error) {
     showToast('Your paper is visible. Re-upload it to use Q&A if the server was restarted.');
@@ -590,6 +685,7 @@ function openFilePicker() { const input = document.querySelector('#fileInput'); 
 
 document.querySelector('#newPaperButton').addEventListener('click', openFilePicker);
 document.querySelector('#replacePaperButton').addEventListener('click', openFilePicker);
+document.querySelector('#landingStartButton').addEventListener('click', launchApp);
 document.querySelector('#fileInput').addEventListener('change', event => analyseFile(event.target.files[0]));
 document.querySelector('#welcomeFileInput').addEventListener('change', event => analyseFile(event.target.files[0]));
 document.querySelector('#dropzone').addEventListener('dragover', event => { event.preventDefault(); event.currentTarget.classList.add('dragging'); });
@@ -597,7 +693,7 @@ document.querySelector('#dropzone').addEventListener('dragleave', event => event
 document.querySelector('#dropzone').addEventListener('drop', event => { event.preventDefault(); event.currentTarget.classList.remove('dragging'); analyseFile(event.dataTransfer.files[0]); });
 tabs.forEach(tab => tab.addEventListener('click', () => renderView(tab.dataset.view)));
 document.querySelector('#sourceRail').addEventListener('click', () => { if (!state.analysis) return showToast('Upload a paper to view its source.'); document.querySelector('#sourcePanel').scrollIntoView({ behavior: 'smooth' }); });
-document.querySelector('#overviewRail').addEventListener('click', () => { if (state.analysis) renderView('overview'); else window.scrollTo({ top: 0, behavior: 'smooth' }); });
+document.querySelector('#overviewRail').addEventListener('click', () => { if (state.analysis) renderView('overview'); else showUploadScreen(); });
 document.querySelector('#openPdfButton').addEventListener('click', () => { const pdfUrl = activePdfUrl(); if (pdfUrl) window.open(`${pdfUrl}#page=1`, '_blank', 'noopener'); });
 localStorage.removeItem('paperpilot-theme');
 document.body.dataset.theme = 'dark';
