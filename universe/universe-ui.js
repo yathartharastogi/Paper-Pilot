@@ -1,4 +1,4 @@
-import { NeuralUniverse } from './neural-universe.js?build=20260731v4';
+import { NeuralUniverse } from './neural-universe.js?build=20260731v5';
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, character => ({
@@ -53,6 +53,7 @@ export class UniversePanel {
       this.sourceReady ? '' : '<p class="universe-restore-note">Restoring the local source session. You can inspect the graph now; Ask and explore will become available when the source reconnects.</p>',
       '<p class="high-stakes-notice" id="highStakesNotice" hidden>Paper Pilot is a research exploration tool and does not provide medical diagnosis or treatment advice.</p>',
       '</div>',
+      '<section class="universe-trace" id="universeTrace" hidden aria-live="polite"></section>',
       '<aside class="universe-detail" id="universeDetail" aria-live="polite"><p class="detail-empty">Select a neuron to inspect its source, evidence quality, and first-degree links.</p></aside>',
       '</section>',
     ].join('');
@@ -157,6 +158,7 @@ export class UniversePanel {
       const traversal = await response.json();
       if (!response.ok) throw new Error(traversal.error || 'The exploration route could not be generated.');
       this.lastTraversal = traversal;
+      this._renderTraversalLog(traversal);
       this.root.querySelector('#highStakesNotice').hidden = !traversal.highStakesNotice;
       if (!traversal.steps?.length) {
         this._setStatus(traversal.summary);
@@ -176,7 +178,26 @@ export class UniversePanel {
   _renderRouteStep(step, index, total) {
     const node = this.graph.nodes.find(item => item.id === step.nodeId);
     this._setStatus('Exploring ' + (index + 1) + ' of ' + total + ': ' + (node?.label || 'source node'));
+    this.root.querySelectorAll('.trace-step').forEach(item => item.classList.toggle('active', Number(item.dataset.traceIndex) === index));
     if (node) this._renderDetail(node, step.reason);
+  }
+
+  _renderTraversalLog(traversal) {
+    const trace = this.root.querySelector('#universeTrace');
+    if (!trace) return;
+    const steps = traversal.steps || [];
+    trace.hidden = false;
+    const items = steps.map((step, index) => {
+      const node = this.graph.nodes.find(item => item.id === step.nodeId);
+      const citation = node?.citation || {};
+      return '<li class="trace-step" data-trace-index="' + index + '"><span class="trace-index">' + String(index + 1).padStart(2, '0') + '</span><div><strong>' + escapeHtml(node?.label || 'Source node') + '</strong><p>' + escapeHtml(step.reason || node?.description || 'Source-linked step') + '</p></div>' + (citation.page ? '<button class="trace-citation" data-page="' + citation.page + '" data-label="' + escapeHtml(citation.label) + '">p. ' + citation.page + '</button>' : '') + '</li>';
+    }).join('');
+    trace.innerHTML = [
+      '<div class="trace-heading"><div><p class="card-label">Followed pathway</p><h3>' + escapeHtml(traversal.query) + '</h3></div><span>' + steps.length + ' steps</span></div>',
+      '<p class="trace-summary">' + escapeHtml(traversal.summary || (steps.length ? 'A source-grounded route was traced through the paper.' : 'No source-grounded path was available for this question.')) + '</p>',
+      steps.length ? '<ol class="trace-steps">' + items + '</ol>' : '<p class="trace-empty">Try a more specific question that the paper itself addresses.</p>',
+    ].join('');
+    trace.querySelectorAll('.trace-citation').forEach(button => button.addEventListener('click', () => this.onCitation(button.dataset.page, button.dataset.label), { signal: this.abortController.signal }));
   }
 
   _renderDetail(node, routeReason = '') {

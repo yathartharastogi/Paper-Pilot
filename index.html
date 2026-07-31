@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111311" />
     <title>PaperPilot — Read beyond the abstract.</title>
-    <link rel="stylesheet" href="styles.css?build=ui20260731v6" />
+    <link rel="stylesheet" href="styles.css?build=ui20260731v10" />
   </head>
-  <body data-theme="dark">
+  <body data-theme="dark" class="landing-active">
     <div class="app-shell">
-      <aside class="sidebar" aria-label="Paper workspace">
+      <aside class="sidebar" aria-label="Paper workspace" hidden>
         <a class="brand" href="/"><span class="brand-mark">P</span><span>paperpilot</span></a>
 
         <button class="new-paper" id="newPaperButton"><span>+</span> New paper</button>
@@ -28,7 +28,7 @@
         </div>
 
         <div class="paper-library" id="paperLibrary" hidden>
-          <span class="nav-label">Saved papers</span>
+          <span class="nav-label">Paper history</span>
           <div class="saved-paper-list" id="savedPaperList"></div>
         </div>
 
@@ -39,7 +39,30 @@
       </aside>
 
       <main class="workspace">
-        <section class="welcome" id="welcomeView">
+        <section class="landing" id="landingView">
+          <div class="landing-copy">
+            <p class="landing-kicker"><span class="landing-signal"></span> Paper Pilot / research station <span class="landing-caret">|</span></p>
+            <h1>Make every <em>paper</em><br />an open universe.</h1>
+            <p class="landing-lede">Read beyond the abstract with source-bound analysis, live evidence trails, and a neural map that keeps every insight tethered to the paper.</p>
+            <div class="landing-actions">
+              <button class="landing-primary" id="landingStartButton" type="button">Launch Paper Pilot <span>&rarr;</span></button>
+            </div>
+            <p class="landing-proof"><span>01</span> Local-first workspace &nbsp; <span>02</span> Source-bound answers &nbsp; <span>03</span> No accounts</p>
+          </div>
+          <div class="landing-orbit" aria-hidden="true">
+            <div class="orbit-ring orbit-ring-one"></div><div class="orbit-ring orbit-ring-two"></div><div class="orbit-core">P</div>
+            <span class="orbit-note orbit-note-one">evidence</span><span class="orbit-note orbit-note-two">method</span><span class="orbit-note orbit-note-three">results</span>
+          </div>
+          <div class="landing-terminal" id="landingTerminal" aria-label="Paper Pilot status terminal">
+            <div class="terminal-bar"><span></span><span></span><span></span><b>paperpilot / live</b></div>
+            <p><i>&gt;</i> source.integrity <strong>verified</strong></p>
+            <p><i>&gt;</i> inference.scope <strong>paper only</strong></p>
+            <p><i>&gt;</i> universe.status <strong>ready to connect</strong></p>
+          </div>
+          <div class="launch-curtain" aria-hidden="true"><span class="launch-mark">P</span><strong>Calibrating your research station</strong><i><b></b></i></div>
+        </section>
+
+        <section class="welcome" id="welcomeView" hidden>
           <p class="section-kicker">Research, with receipts.</p>
           <h1>Understand the paper<br><em>behind</em> the abstract.</h1>
           <p class="welcome-copy">Upload a research paper for a source-bound overview, evidence check, concept map, and focused discussion.</p>
@@ -70,6 +93,7 @@
             <button class="tab" data-view="debate" role="tab" aria-selected="false">Debate</button>
             <button class="tab" data-view="universe" role="tab" aria-selected="false">Universe</button>
             <button class="tab" data-view="map" role="tab" aria-selected="false">Concept map</button>
+            <button class="tab" data-view="flashcards" role="tab" aria-selected="false">Flashcards</button>
             <button class="tab" data-view="ask" role="tab" aria-selected="false">Ask paper</button>
           </div>
 
@@ -111,7 +135,7 @@
         }
       }
     </script>
-    <script type="module" src="universe/universe-bridge.js?build=20260731v4"></script>
-    <script src="app.js?build=20260731v9"></script>
+    <script type="module" src="universe/universe-bridge.js?build=20260731v5"></script>
+    <script src="app.js?build=20260731v13"></script>
   </body>
 </html>
